@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>옛한글→쯔꾸옥응어 변환기</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;800&display=swap');
+        body { font-family: 'Pretendard', sans-serif; background-color: #f8fafc; color: #1e293b; }
+        .glass-card { background: white; border: 1px solid #e2e8f0; border-radius: 1.25rem; box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.04); }
+        .hangeul-input { font-feature-settings: "ccmp" 1; resize: none; scrollbar-width: thin; }
+        .toggle-switch { position: relative; display: inline-block; width: 50px; height: 26px; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #cbd5e1; transition: .3s; border-radius: 34px; }
+        .toggle-slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px; background-color: white; transition: .3s; border-radius: 50%; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        input:checked + .toggle-slider { background-color: #4f46e5; }
+        input:checked + .toggle-slider:before { transform: translateX(24px); }
+        .mode-active { color: #4f46e5; font-weight: 700; }
+        #copyBuffer { position: absolute; left: -9999px; top: 0; }
+        .double-toggle {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-left: 1rem;
+            padding-left: 1rem;
+            border-left: 1px solid #e2e8f0;
+        }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div class="max-w-4xl mx-auto px-6 py-12">
+        <header class="mb-10 text-center">
+            <h1 class="text-4xl font-extrabold tracking-tight text-slate-900 mb-3">옛한글 → 쯔꾸옥응어</h1>
+            <p class="text-slate-500 font-medium">동음, 화음 규칙 및 설상음 모드 지원</p>
+        </header>
+
+        <main class="space-y-6">
+            <div class="glass-card overflow-hidden">
+                <div class="px-6 py-4 bg-slate-50 border-b border-slate-100 flex justify-between items-center">
+                    <div class="flex items-center space-x-6">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-widest">Input</span>
+                        <div class="flex items-center bg-white px-3 py-1.5 rounded-full border border-slate-200 shadow-sm">
+                            <span id="labelNormal" class="text-[11px] font-bold mr-3 text-slate-400">동음</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="chineseMode">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span id="labelChinese" class="text-[11px] font-bold ml-3 text-slate-400">화음</span>
+                        </div>
+                        
+                        <!-- 설상음 스위치 추가 -->
+                        <div class="double-toggle">
+                            <span id="labelNonRetroflex" class="text-[11px] font-bold mr-3 text-slate-400">일반</span>
+                            <label class="toggle-switch">
+                                <input type="checkbox" id="retroflexMode">
+                                <span class="toggle-slider"></span>
+                            </label>
+                            <span id="labelRetroflex" class="text-[11px] font-bold ml-3 text-slate-400">설상음</span>
+                        </div>
+                    </div>
+                </div>
+                <textarea id="input" class="w-full h-56 p-8 hangeul-input focus:outline-none text-2xl leading-relaxed placeholder-slate-300" placeholder="옛한글을 입력하세요..."></textarea>
+            </div>
+
+            <div class="flex justify-center -my-3 relative z-10">
+                <div class="bg-white border border-slate-200 p-3 rounded-full shadow-md text-indigo-500">
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+                </div>
+            </div>
+
+            <div class="glass-card overflow-hidden bg-indigo-50/30 border-indigo-100">
+                <div class="px-6 py-4 border-b border-indigo-100/50 flex justify-between items-center">
+                    <span class="text-xs font-bold text-indigo-500 uppercase tracking-widest">Result</span>
+                    <button onclick="copyContent()" id="copyBtn" class="text-xs font-bold bg-white border border-indigo-200 text-indigo-600 px-5 py-2 rounded-full hover:bg-indigo-600 hover:text-white transition-all shadow-sm active:scale-95">결과 복사하기</button>
+                </div>
+                <div id="output" class="w-full min-h-[140px] p-8 text-2xl font-bold text-slate-800 break-all whitespace-pre-wrap leading-relaxed"></div>
+            </div>
+            <textarea id="copyBuffer" readonly aria-hidden="true"></textarea>
+        </main>
+    </div>
+
+    <script>
+        // --- [Data Maps - 기존과 동일] ---
+        const CHOSEONG_POLARITY = { '\u1100': '음', '\u1101': '양', '\u1102': '양', '\u1103': '음', '\u1104': '양', '\u1105': '양', '\u1106': '양', '\u1107': '음', '\u1108': '양', '\u1109': '음', '\u110A': '양', '\u11EB': '양', '\u110B': '양', '\u114C': '양', '\u110C': '음', '\u110D': '양', '\u110E': '음', '\u110F': '음', '\u1110': '음', '\u1111': '음', '\u1112': '음', '\u1158': '양', '\u1159': '음', '\u115F': '음' };
+        const CHOSEONG_RULES = { 
+    // 기존 규칙
+    '\u1100': { default: 'c' }, '\u1101': { default: 'c̬' }, '\u1102': { default: 'n' },
+    '\u1103': { default: 'đ̥' }, '\u1104': { default: 'đ' }, '\u1105': { default: 'l' },
+    '\u1106': { default: 'm' }, '\u1107': { default: 'b̥' }, '\u1108': { default: 'b' },
+    '\u1109': { default: 't', j: 'th' }, '\u110A': { default: 't̬', j: 't̬h' },
+    '\u11EB': { default: 'nh', j: 'nh' }, '\u110B': { default: 'ʻ', j: 'd', w: 'v' },
+    '\u114C': { default: 'ng' }, '\u110C': { default: 'ț', j: 'ch' },
+    '\u110D': { default: 'ț̬', j: 'ť̬h' }, '\u110E': { default: 'țḧ', j: 'x' },
+    '\u110F': { default: 'kḧ' }, '\u1110': { default: 'tḧ' }, '\u1111': { default: 'pḧ' },
+    '\u1112': { default: 'h' }, '\u1158': { default: 'h̬' },
+    '\u1159': { default: 'ʼ', j: 'ʼd', w: 'ʼv' }, '\u115F': { default: 'ʼ' },
+    
+    // 새로 추가된 규칙
+    '\u112B': { default: 'p̆h' },           // ᄫ
+    '\u1157': { default: 'ph' },            // ᅗ
+    '\u112C': { default: 'p̬h' },            // ᄬ
+    '\u111D': { default: 'v' },             // ᅝ (U+115D? → 실제 U+111D: ᄝ)
+    '\u114E': { default: 'ț' },             // ᅎ
+    '\u1154': { default: 'țḧ' },            // ᅔ
+    '\u114F': { default: 'ț̬' },             // ᅏ
+    '\u113C': { default: 't' },             // ᄼ
+    '\u113D': { default: 't̬' },             // ᄽ
+    
+    // ᅐ, ᅕ, ᅑ, ᄾ, ᄿ 에 대한 규칙 (설상음 모드에서 변환)
+    '\u1150': { default: 'țr', j: 'ch' },   // ᅐ
+    '\u1155': { default: 'ș', j: 'x' },      // ᅕ
+    '\u1151': { default: 'ș̬', j: 'ť̬h' },    // ᅑ
+    '\u113E': { default: 's', j: 'th' },    // ᄾ
+    '\u113F': { default: 's̬', j: 't̬h' },    // ᄿ
+    '\u1140': { default: 'nh' }, 
+
+};
+        const JUNGSEONG_MAP = { '\u1161': 'ㅏ', '\u1162': 'ㅐ', '\u1163': 'ㅑ', '\u1164': 'ㅒ', '\u1165': 'ㅓ', '\u1166': 'ㅔ', '\u1167': 'ㅕ', '\u1168': 'ㅖ', '\u1169': 'ㅗ', '\u116A': 'ㅘ', '\u116B': 'ㅙ', '\u116C': 'ㅚ', '\u116D': 'ㅛ', '\u116E': 'ㅜ', '\u116F': 'ㅝ', '\u1170': 'ㅟ', '\u1171': 'ㅟ', '\u1172': 'ㅠ', '\u1173': 'ㅡ', '\u1174': 'ㅢ', '\u1175': 'ㅣ', '\u119E': 'ㆍ', '\u1184': 'ㆇ', '\u1191': 'ㆊ', '\u1192': 'ㆋ', '\u11A1': 'ㆎ', '\u1194': 'ㆌ' };
+        const JONGSEONG_MAP = { '\u11A8': 'ㄱ', '\u11A9': 'ㄲ', '\u11AB': 'ㄴ', '\u11AF': 'ㄹ', '\u11B7': 'ㅁ', '\u11B8': 'ㅂ', '\u11BA': 'ㅅ', '\u11BC': 'ㅇ', '\u11BD': 'ㅈ', '\u11BE': 'ㅊ', '\u11BF': 'ㅋ', '\u11C0': 'ㅌ', '\u11C1': 'ㅍ', '\u11C2': 'ㅎ', '\u11EB': 'ㅿ', '\u11F0': 'ㆁ', '\u11F9': 'ㆆ', '\u11D9': 'ㅭ', '\u11E2': 'ㅱ', '\u11AE': 'ㄷ' };
+        const SYLLABLE_RULES = { "ㅏㅇ": "a⁼^", "ㅏㄱ": "a⁼c", "ㆍㄱ": "â⁼c", "ㅡㄱ": "ă⁼c", "ㆎㄱ": "a⁼ch", "ㅐㅇ": "a⁼İ^", "ㅏㅁ": "a⁼m", "ㅡㅁ": "â⁼m", "ㅏㄴ": "a⁼n", "ㅡㄴ": "â⁼n", "ㆍㄴ": "ă⁼n", "ㅏㆁ": "a⁼ng", "ㆍㆁ": "â⁼ng", "ㅡㆁ": "ă⁼ng", "ㆎㆁ": "a⁼nh", "ㅗㅱ": "a⁼O^", "ㅏㅂ": "a⁼p", "ㅡㅂ": "â⁼p", "ㅏㅭ": "a⁼t", "ㅡㅭ": "â⁼t", "ㆍㅭ": "ă⁼t", "ㅜㅱ": "â⁼U^", "ㅖㅇ": "a⁼Y^", "ㅕㄱ": "i⁼ch", "ㅕㆁ": "i⁼nh", "ㅣㅇ": "i⁼ʸ^", "ㅕㅁ": "İê⁼m", "ㅕㄴ": "İê⁼n", "ㅕㅂ": "İê⁼p", "ㅕㅭ": "İê⁼t", "ㅛㅱ": "İê⁼U^", "ㅢㅇ": "ᵚi⁼ʸ^", "ㅗㅇ": "ô⁼^", "ㅗㄱ": "ô⁼c", "ㆎㅇ": "o⁼İ^", "ㅚㅇ": "ô⁼İ^", "ㅓㅁ": "ơ⁼m", "ㅗㄴ": "ô⁼n", "ㅓㄴ": "ơ⁼n", "ㅗㆁ": "ô⁼ng", "ㅓㅂ": "ơ⁼p", "ㅗㅭ": "ô⁼t", "ㅓㅭ": "ơ⁼t", "ㅘㅇ": "Oa⁼^", "ㅘㄱ": "Oa⁼c", "ㅟㄱ": "Oă⁼c", "ㅙㅇ": "Oa⁼İ^", "ㅘㄴ": "Oa⁼n", "ㅘㆁ": "Oa⁼ng", "ㅚㆁ": "Oa⁼nh", "ㅘㅭ": "Oa⁼t", "ㅜㅇ": "u⁼^", "ㅠㅇ": "u⁼^", "ㅓㅇ": "ư⁼^", "ㅜㄱ": "u⁼c", "ㅣㄱ": "ư⁼c", "ㅜㆁ": "u⁼ng", "ㅣㆁ": "ư⁼ng", "ㅠㅱ": "ư⁼U^", "ㅟㅇ": "u⁼Y^", "ㆍㅇ": "ư⁼ʸ^", "ㅚㄱ": "Uâ⁼c", "ㅜㄴ": "Uâ⁼n", "ㅜㅭ": "Uâ⁼t", "ㆋㅇ": "Uê⁼ʸ^", "ㆇㄱ": "Uô⁼c", "ㅑㄱ": "Ươ⁼c", "ㅝㄴ": "Uơ⁼n", "ㆇㆁ": "Uô⁼ng", "ㅑㆁ": "Ươ⁼ng", "ㅝㅭ": "Uơ⁼t", "ㅟㆁ": "Uy⁼nh", "ㅠㄴ": "Uʸâ⁼n", "ㅠㅭ": "Uʸâ⁼t", "ㆊㄴ": "uyê⁼n", "ㆊㅭ": "uyê⁼t", "ㆍㅁ": "ᶺâ⁼m", "ㆍㅂ": "ᶺâ⁼p", "ㅗㄱ": "ô⁼c", "ㅜㄱ": "u⁼c", "ㅑㅇ": "ʸa⁼^", "ㅣㅁ": "ʸâ⁼m", "ㅣㄴ": "ʸâ⁼n", "ㅣㅂ": "ʸâ⁼p", "ㅣㅭ": "ʸâ⁼t", "ㅛㄱ": "ʸô⁼c", "ㅛㆁ": "ʸô⁼ng", "ㅕㅇ": "ʸư⁼^", "ㅠㄱ": "ʸu⁼c", "ㅠㆁ": "ʸu⁼ng", "ㆌㅇ": "ʸu⁼Y^", "ㆊㄱ": "ʸUy⁼ch", "ㆊㆁ": "ʸUy⁼nh" };
+
+        const inputField = document.getElementById('input');
+        const outputField = document.getElementById('output');
+        const chineseModeCheckbox = document.getElementById('chineseMode');
+        const retroflexModeCheckbox = document.getElementById('retroflexMode');
+        const labelNormal = document.getElementById('labelNormal');
+        const labelChinese = document.getElementById('labelChinese');
+        const labelNonRetroflex = document.getElementById('labelNonRetroflex');
+        const labelRetroflex = document.getElementById('labelRetroflex');
+
+        // 설상음 모드용 초성 규칙 (기본값과 다름)
+        const RETROFLEX_RULES = {
+            '\u1150': { default: 'tr', j: 'ch' },   // ᅐ
+            '\u1155': { default: 'ś', j: 'x' },      // ᅕ (ś는 s에 acute accent)
+            '\u1151': { default: 't̬r', j: 'ť̬h' }    // ᅑ
+        };
+
+        // --- [핵심: 확장된 화음 모드 변환 함수] ---
+        function applyChineseModeRules(jungStr, jongStr) {
+            let modifiedJung = jungStr;
+            let modifiedJong = jongStr;
+
+            // 1. 받침이 없으면 'ㅇ'으로 간주
+            if (!modifiedJong || modifiedJong === '') {
+                modifiedJong = 'ㅇ';
+            }
+            
+            // 2. 받침 'ㄷ' → 'ㅭ' 변환
+            if (modifiedJong === 'ㄷ') {
+                modifiedJong = 'ㅭ';
+            }
+            
+            // 3. 복합 변환 규칙 (중성 + 종성 조합)
+            const complexRules = {
+                'ㅕㅱ': 'ㅛㅱ',    // ㅕ + ㅱ → ㅛ + ㅱ
+                'ㅡㅱ': 'ㅜㅱ',
+                'ㅣㅱ': 'ㅠㅱ',
+                'ㅏㅱ': 'ㅗㅱ',
+                'ㅑㅱ': 'ㅛㅱ',
+
+                'ㅜㅇ': 'ㅗㅇ',    // ㅜ + ㅇ → ㅗ + ㅇ
+                'ㅜㆁ': 'ㅗㆁ',    // ㅜ + ㆁ → ㅗ + ㆁ
+                'ㅜㄱ': 'ㅗㄱ',    // ㅜ + ㄱ → ㅗ + ㄱ
+                'ㅠㆁ': 'ㅛㆁ',    // ㅜ + ㆁ → ㅗ + ㆁ
+                'ㅠㄱ': 'ㅛㄱ',    // ㅜ + ㄱ → ㅗ + ㄱ
+
+                'ㆌㄱ': 'ㆊㄱ',
+                'ㆌㆁ': 'ㆊㆁ',
+                'ㅣㄱ': 'ㅕㄱ',
+                'ㅣㆁ': 'ㅕㆁ',
+                'ㅡㅇ': 'ㆍㅇ',
+                'ㅢㄱ': 'ㆎㄱ',
+                'ㅢㆁ': 'ㆎㆁ',
+            };
+            
+            const combination = modifiedJung + modifiedJong;
+            if (complexRules[combination]) {
+                const target = complexRules[combination];
+                modifiedJung = target[0];
+                modifiedJong = target[1];
+            }
+            
+            return { jungStr: modifiedJung, jongStr: modifiedJong };
+        }
+
+        function processHangeul(text) {
+            if (!text) return "";
+            const isChineseMode = chineseModeCheckbox.checked;
+            const isRetroflexMode = retroflexModeCheckbox.checked;
+            
+            // UI 업데이트
+            if (isChineseMode) {
+                labelChinese.classList.add('mode-active');
+                labelNormal.classList.remove('mode-active');
+            } else {
+                labelNormal.classList.add('mode-active');
+                labelChinese.classList.remove('mode-active');
+            }
+            
+            if (isRetroflexMode) {
+                labelRetroflex.classList.add('mode-active');
+                labelNonRetroflex.classList.remove('mode-active');
+            } else {
+                labelNonRetroflex.classList.add('mode-active');
+                labelRetroflex.classList.remove('mode-active');
+            }
+            
+            const nfd = text.normalize('NFD');
+            const charArray = [...nfd];
+            let syllables = [];
+            const jVowels = ['ㅣ', 'ㅑ', 'ㅕ', 'ㅛ', 'ㅠ', 'ㅒ', 'ㅖ', 'ㆇ', 'ㆊ'];
+            const wVowels = ['ㅜ', 'ㅟ', 'ㅝ', 'ㅞ', 'ㅘ', 'ㅙ'];
+            
+            // 화음 모드 전용 중성+종성 매핑
+            const chineseSyllableMap = {
+                'ㅓㅇ': 'å⁼^',
+                'ㅝㅇ': 'Oå⁼^',
+                'ㅝㄴ': 'Oån⁼',
+                'ㅝㅭ': 'Oåt⁼',
+                'ㅕㅇ': 'ä⁼^',
+                'ㅠㅇ': 'ư⁼^',
+                'ㆊㅇ': 'Öå⁼^'
+            };
+
+            for (let i = 0; i < charArray.length; i++) {
+                const char = charArray[i];
+                const code = char.charCodeAt(0);
+
+                if (code >= 0x1100 && code <= 0x115F) {
+                    let jungStr = '', jongStr = '', toneChar = '';
+                    let skipCount = 0;
+
+                    for (let j = 1; j <= 5; j++) {
+                        if (i + j >= charArray.length) break;
+                        const c = charArray[i+j];
+                        const cc = c.charCodeAt(0);
+                        if (cc >= 0x1161 && cc <= 0x11A7) { jungStr = JUNGSEONG_MAP[c] || ''; skipCount++; } 
+                        else if (cc >= 0x11A8 && cc <= 0x11FF) { jongStr = JONGSEONG_MAP[c] || ''; skipCount++; } 
+                        else if (cc === 0x302E || cc === 0x302F) { toneChar = c; skipCount++; } 
+                        else break;
+                    }
+
+                    // 화음 모드 적용
+                    if (isChineseMode) {
+                        const modified = applyChineseModeRules(jungStr, jongStr);
+                        jungStr = modified.jungStr;
+                        jongStr = modified.jongStr;
+                    }
+
+                    const polarity = CHOSEONG_POLARITY[char] || '음';
+                    const rule = CHOSEONG_RULES[char];
+                    let choRom = '';
+
+                    if (rule) {
+                        // 설상음 모드일 때 특별 규칙 적용
+                        if (isRetroflexMode) {
+                            if (char === '\u1150') { // ᅐ
+                                choRom = 'tr';
+                            } else if (char === '\u1155') { // ᅕ
+                                choRom = 'ś';
+                            } else if (char === '\u1151') { // ᅑ
+                                choRom = 't̬r';
+                            } else {
+                                // 기존 규칙 적용
+                                if (jVowels.includes(jungStr) && rule.j) choRom = rule.j;
+                                else if (wVowels.includes(jungStr) && rule.w) choRom = rule.w;
+                                else choRom = rule.default || '';
+                            }
+                        } else {
+                            // 일반 모드: 기존 규칙 적용
+                            if (jVowels.includes(jungStr) && rule.j) choRom = rule.j;
+                            else if (wVowels.includes(jungStr) && rule.w) choRom = rule.w;
+                            else choRom = rule.default || '';
+                        }
+                    } else {
+                        choRom = char.normalize('NFC');
+                    }
+
+                    // specialCombos 정의
+                    const specialCombos = {
+                        'ㅑㅇ': 'ㅏㅇ',
+                        'ㅑㆁ': 'ㅏㆁ',
+                        'ㅑㄱ': 'ㅏㄱ',
+                        'ㅒㅇ': 'ㅐㅇ',
+                        'ㅑㄴ': 'ㅏㄴ',
+                        'ㅑㅭ': 'ㅏㅭ',
+                        'ㅑㅁ': 'ㅏㅁ',
+                        'ㅑㅂ': 'ㅏㅂ'
+                    };
+                    // 자음 그룹 정의
+                    const ckPattern = ['c', 'k', 'c̬', 'k̬'];  // 그룹 1: gi/g̊i로 변환
+                    const hNgPattern = ['kḧ', 'h', 'h̬', 'ng', 'ngh', 'ʻd', 'ʼd'];  // 그룹 2: specialCombos 적용 + \u0313 추가
+                    const currentCombo = jungStr + jongStr;
+
+                    // specialCombos 처리
+                    if (specialCombos[currentCombo]) {
+                        if (ckPattern.includes(choRom)) {
+                            // 그룹 1: c, k, c̬, k̬ - specialCombos 적용 + gi/g̊i로 변환
+                            const target = specialCombos[currentCombo];
+                            jungStr = target[0];
+                            jongStr = target.slice(1);
+                            
+                            const isTwin = (choRom === 'c̬' || choRom === 'k̬');
+                            choRom = isTwin ? 'g̊i' : 'gi';
+                        } 
+                        else if (hNgPattern.includes(choRom)) {
+                            // 그룹 2: h, h̬, ng, ngh, ʻd, ʼd - specialCombos만 적용 (나중에 \u0313 추가)
+                            const target = specialCombos[currentCombo];
+                            jungStr = target[0];
+                            jongStr = target.slice(1);
+
+                            const hookMapping = {
+                                'kḧ': 'k̓ḧ',
+                                //'ʻd': 'ʻd̓',
+                                //'ʼd': 'ʼd̓',
+                                'ng': 'n̓g',
+                                'ngh': 'n̓gh',
+                                'h': 'h̓',
+                                'h̬': 'h̬̓'
+                            };
+                            choRom = hookMapping[choRom] || choRom;
+                        }
+                        // 그룹 3: 나머지 자음은 specialCombos 적용 안 함
+                    }
+
+                    // mjRom 계산
+                    let mjRom;
+                    const comboKey = jungStr + jongStr;
+                    
+                    if (isChineseMode && chineseSyllableMap[comboKey]) {
+                        mjRom = chineseSyllableMap[comboKey];
+                    } else {
+                        mjRom = SYLLABLE_RULES[comboKey] || (jungStr + jongStr);
+                    }
+
+                    // \u0313 추가 규칙
+                    if (choRom !== 'd' && choRom !== 'đ' && choRom !== 'đ̥') {
+                        const giPattern = /^g(?:i|̊i)/;
+                        if (!giPattern.test(choRom)) {
+                            const mjRomWithoutSpecials = mjRom.replace(/[⁼^ʸᵚᶺʷ]/g, '');
+                            const check = mjRomWithoutSpecials.toLowerCase();
+
+                            // mjRom이 'i'로 시작하지 않는 경우에만 \u0313 추가
+
+                        }
+                    }
+
+                    // c/q 변환 예외 처리
+                    if (choRom === 'c' || choRom === 'c̬') {
+                        const isTwin = choRom === 'c̬';
+                        const check = mjRom.replace(/[⁼^ʸᵚᶺʷ]/g, '').toLowerCase();
+                        
+                        if (/^ö[å]/.test(check)) {
+                            choRom = isTwin ? 'q̬' : 'q';
+                            mjRom = mjRom.replace('ö', 'ü').replace('Ö', 'Ü');
+                        }
+                        else if (/^[eêi]/.test(check)) {
+                            choRom = isTwin ? 'k̬' : 'k';
+                        }
+                        else if (/^u[aeioâăy]/.test(check)) {
+                            choRom = isTwin ? 'q̬' : 'q';
+                        }
+                        else if (/^o[aåeiâăy]/.test(check)) {
+                            choRom = isTwin ? 'q̬' : 'q';
+                            mjRom = mjRom.replace('o', 'u').replace('O', 'U');
+                        }
+                    }
+
+                    // Oă⁼c 패턴 처리 (c, c̬ 뒤에 Oă⁼c가 오면 Oô⁼c로 변경)
+                    if ((choRom === 'c' || choRom === 'c̬') && mjRom === 'Oă⁼c') {
+                        mjRom = 'Oô⁼c';
+                        const isTwin = choRom === 'c̬';
+                        choRom = isTwin ? 'q̬' : 'q';
+                    }
+
+                    // ng → ngh 변환 (e, ê, i 앞에서)
+                    if (choRom === 'ng') {
+                        const check = mjRom.replace(/[⁼^ʸᵚᶺʷ]/g, '').toLowerCase();
+                        if (/^[eêi]/.test(check)) {
+                            choRom = 'ngh';
+                        }
+                    }
+
+
+
+                    // 최종 결합
+                    let combined = choRom + mjRom;
+                    
+                    // ö → ü 변환 (화음 모드에서만)
+                    if (isChineseMode) {
+                        combined = combined.replace(/ö/g, 'ü');
+                    }
+                    
+                    // 그룹 변환 규칙
+                    const yGroup = /^(h|h̬|k|k̬|l|m|t|t̬|ț|ț̬|n|s|s̬|v|ʻv)(ᵚ?i)⁼ʸ\^/;
+                    if (yGroup.test(combined)) combined = combined.replace(/(ᵚ?i)⁼ʸ\^/, 'y⁼ʸ^');
+                    const dGroup = /^(d|ʻd)i⁼ʸ\^/;
+                    if (dGroup.test(combined)) combined = combined.replace(/^(d|ʻd)i⁼ʸ\^/, (m, p1) => (p1 === 'ʻd' ? 'ʻy⁼ʸ^' : 'y⁼ʸ^'));
+                    const glotGroup = /^(ʼ|ʻ)ᵚi⁼ʸ\^/;
+                    if (glotGroup.test(combined)) combined = combined.replace(/^(ʼ|ʻ)ᵚi⁼ʸ\^/, (m, p1) => p1 + 'y⁼ʸ^');
+                    if (/^(v|ʻv|ʼv)u⁼Y\^/.test(combined)) combined = combined.replace('u⁼Y^', 'y⁼^');
+
+                    // 성조 결정
+                    const isEntering = /⁼(c|t|p|ch)/.test(combined);
+                    let accent = isEntering ? (polarity === '음' ? '\u0301' : '\u0323') : 
+                                 (toneChar === '\u302F' ? (polarity === '음' ? '\u0309' : '\u0303') : 
+                                 (toneChar === '\u302E' ? (polarity === '음' ? '\u0301' : '\u0323') : 
+                                 (polarity === '음' ? '' : '\u0300')));
+
+                    // 성조 위치 찾기 - ⁼ 앞의 마지막 모음에 적용
+                    if (accent) {
+                        const eqIdx = combined.indexOf('⁼');
+                        let insIdx = -1;
+                        
+                        if (eqIdx > 0) {
+                            const beforeEq = combined.slice(0, eqIdx);
+                            const lastVowelMatch = [...beforeEq.matchAll(/[aeiouyâăêôơưüåäƯOİYᵚᶺʸ]/gi)];
+                            if (lastVowelMatch.length > 0) {
+                                insIdx = lastVowelMatch[lastVowelMatch.length - 1].index + 1;
+                            }
+                        }
+                        
+                        if (insIdx === -1) {
+                            const allVowels = [...combined.matchAll(/[aeiouyâăêôơưüåäƯOİYᵚᶺʸ]/gi)];
+                            if (allVowels.length > 0) {
+                                insIdx = allVowels[allVowels.length - 1].index + 1;
+                            }
+                        }
+                        
+                        combined = insIdx !== -1 ? combined.slice(0, insIdx) + accent + combined.slice(insIdx) : combined + accent;
+                    }
+
+                    // 특수문자 제거 및 정리
+                    let clean = combined.replace(/[⁼^ʸᵚᶺʷ]/g, '');
+                    clean = clean.replace(/(v|ʼv|ʻv)(?!ng)[\u0300-\u036f]*[uo]/gi, (m) => m.slice(0, -1));
+                    syllables.push(clean.toLowerCase());
+                    i += skipCount;
+                } else {
+                    const other = char.normalize('NFC');
+                    if (other.trim() || char === ' ' || char === '\n') syllables.push(other);
+                }
+            }
+            let result = syllables.join(' ');  // 단어 사이는 공백으로 연결
+            result = result.replace(/\n /g, '\n');  // 줄바꿈 뒤 공백 제거
+            return result;
+        }
+
+        // --- [이벤트 및 유틸리티] ---
+        inputField.addEventListener('input', () => { outputField.textContent = processHangeul(inputField.value); });
+        chineseModeCheckbox.addEventListener('change', () => { outputField.textContent = processHangeul(inputField.value); });
+        retroflexModeCheckbox.addEventListener('change', () => { outputField.textContent = processHangeul(inputField.value); });
+
+        function copyContent() {
+            const text = outputField.textContent;
+            if(!text) return;
+            const buffer = document.getElementById('copyBuffer');
+            buffer.value = text;
+            buffer.select();
+            try {
+                if (document.execCommand('copy')) {
+                    const btn = document.getElementById('copyBtn');
+                    const original = btn.innerText;
+                    btn.innerText = '성공적으로 복사됨!';
+                    btn.classList.replace('text-indigo-600', 'text-emerald-600');
+                    setTimeout(() => {
+                        btn.innerText = original;
+                        btn.classList.replace('text-emerald-600', 'text-indigo-600');
+                    }, 1500);
+                }
+            } catch (err) { console.error('복사 실패', err); }
+        }
+    </script>
+</body>
+</html>
